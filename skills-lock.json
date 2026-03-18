@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "skills": {
+    "docker-expert": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "76bd52d934142cb8f3861cb37f2a39ad93bf3b03dcbc94a02beaa0544f6dd7c2"
+    },
+    "game-design-theory": {
+      "source": "pluginagentmarketplace/custom-plugin-game-developer",
+      "sourceType": "github",
+      "computedHash": "e87a16b82d8379b1389c94b15b16d2f52a611338467291aeeec4f72a73a7fd96"
+    },
+    "pixi-js": {
+      "source": "mindrally/skills",
+      "sourceType": "github",
+      "computedHash": "0af428d78813d1abe0864539b9dab68a190f16b7f0d96568b9e42367c3c52bb1"
+    },
+    "test-driven-development": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "126f1ebf6ccd414f42544f6e83d8cc5adb089e1108eaffb7c400701e37eecd9f"
+    },
+    "typescript-best-practices": {
+      "source": "0xbigboss/claude-code",
+      "sourceType": "github",
+      "computedHash": "838d6737e59e8b15457a6af23112bc3a107a8ac098606a19a43c2be0db2dbe5a"
+    },
+    "typescript-expert": {
+      "source": "sickn33/antigravity-awesome-skills",
+      "sourceType": "github",
+      "computedHash": "f0f625132cf53116cb27725926e2c99f142861b9063d459938dd85fbf8e2bf61"
+    },
+    "vite": {
+      "source": "antfu/skills",
+      "sourceType": "github",
+      "computedHash": "867ff66238f3152e9c494339ad08dc432dd0df5bcf5cc7a00b61a72b580eb908"
+    },
+    "xstate": {
+      "source": "seed-hypermedia/seed",
+      "sourceType": "github",
+      "computedHash": "c743411252fc09f07cda7bf01620337735397e5a607e93f4ba6560768c9aab72"
+    }
+  }
+}
