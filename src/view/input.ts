@@ -16,11 +16,13 @@ type Machine = Actor<typeof gameMachine>
  */
 export const createInput = (machine: Machine) => {
   const dir: InputDirection = { up: false, down: false, left: false, right: false }
+  let shiftHeld = false
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
       e.preventDefault()
     }
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') shiftHeld = true
 
     const snapshot = machine.getSnapshot()
     const ctx = snapshot.context
@@ -40,6 +42,14 @@ export const createInput = (machine: Machine) => {
       case 'ArrowDown':  case 'KeyS': dir.down  = true; break
       case 'ArrowLeft':  case 'KeyA': dir.left  = true; break
       case 'ArrowRight': case 'KeyD': dir.right = true; break
+
+      // Q / C — drink coffee (only while playing; Q/C are safe: no movement binding)
+      case 'KeyQ': case 'KeyC': {
+        if (snapshot.value === 'playing') {
+          machine.send({ type: 'DRINK_COFFEE' })
+        }
+        break
+      }
 
       case 'KeyE': case 'Space': {
         // ---------------------------------------------------------------- dialogue state
@@ -132,6 +142,7 @@ export const createInput = (machine: Machine) => {
   }
 
   const onKeyUp = (e: KeyboardEvent) => {
+    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') shiftHeld = false
     // Battle state: movement keys irrelevant
     if (machine.getSnapshot().value === 'battle') return
     switch (e.code) {
@@ -147,6 +158,7 @@ export const createInput = (machine: Machine) => {
 
   return {
     getVelocity: (speed: number) => inputToVelocity(dir, speed),
+    isSprinting: () => shiftHeld,
     destroy: () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)

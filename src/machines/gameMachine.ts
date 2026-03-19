@@ -1,8 +1,9 @@
 import { setup, assign } from 'xstate'
+import { getItemQuantity } from '../logic/inventory'
 import type { GameState, Vec2 } from '../logic/state'
 import { INITIAL_STATE } from '../logic/state'
 import type { TaskType } from '../logic/tasks'
-import { calculateLevel } from '../logic/xp'
+import { calculateLevel, flowStateXpMultiplier } from '../logic/xp'
 import { addItem, removeItem } from '../logic/inventory'
 import { markNpcInteracted } from '../logic/npc'
 import { isEligibleForPromotion } from '../logic/promotion'
@@ -22,6 +23,15 @@ import {
   PLAYER_MAX_HP,
   CHAZ_MAX_HP,
 } from '../logic/battle'
+import {
+  pickHotZone,
+  isInHotZone,
+  HOT_ZONE_INTERVAL,
+  HOT_ZONE_DURATION,
+  VC_VISIT_INTERVAL,
+  VC_VISIT_DURATION,
+  VC_PENALTY_RADIUS,
+} from '../logic/events'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -30,13 +40,58 @@ import {
 const PLAYER_SIZE = 24
 const PLAYER_HALF = PLAYER_SIZE / 2
 
+/** Energy drained per tick-delta unit — 1 point per 300 ticks ≈ 5 s at 60 fps. */
+const ENERGY_DRAIN_RATE = 1 / 300
+
+/** Caffeine boost duration in ticks (≈ 10 s at 60 fps). */
+const CAFFEINE_DURATION = 600
+
+/** Energy increase from one Energy Drink. Capped at 100. */
+const COFFEE_ENERGY_BOOST = 40
+
+/** Combo streak length required to enter Flow State. */
+const FLOW_STATE_THRESHOLD = 3
+
+/** Ticks of inactivity before the combo streak resets (≈ 30 s at 60 fps). */
+const COMBO_DECAY_TICKS = 1800
+
+/** Extra energy drain multiplier applied per tick while sprinting (stacks on top of base). */
+const SPRINT_EXTRA_DRAIN_MULTIPLIER = 4
+
+/** Energy drain multiplier when Caffeine Aura perk is active (reduces drain). */
+const CAFFEINE_AURA_DRAIN_MULTIPLIER = 0.5
+
+/** Extra energy drain while standing in a Hot Zone (per tick). */
+const HOT_ZONE_EXTRA_DRAIN = ENERGY_DRAIN_RATE * 3
+
+/** Extra energy drain per tick while inside a VC Visit aura. */
+const VC_ENERGY_DRAIN = ENERGY_DRAIN_RATE * 2
+
+/** Level at which the Caffeine Aura perk unlocks. */
+const CAFFEINE_AURA_LEVEL = 4
+
+/** Level at which the Sprint perk unlocks. */
+const SPRINT_LEVEL = 7
+
+/** Maps level → internal perk id. */
+const PERK_BY_LEVEL: Readonly<Record<number, string>> = {
+  [CAFFEINE_AURA_LEVEL]: 'caffeine-aura',
+  [SPRINT_LEVEL]:        'sprint',
+}
+
+/** Maps level → human-readable perk name for the HUD notification. */
+const PERK_DISPLAY_NAME: Readonly<Record<number, string>> = {
+  [CAFFEINE_AURA_LEVEL]: 'CAFFEINE AURA',
+  [SPRINT_LEVEL]:        'SPRINT (SHIFT)',
+}
+
 // ---------------------------------------------------------------------------
 // Event types
 // ---------------------------------------------------------------------------
 
 export type GameEvent =
   | { type: 'START_GAME' }
-  | { type: 'TICK'; delta: number; velocity: Vec2 }
+  | { type: 'TICK'; delta: number; velocity: Vec2; isSprinting?: boolean }
   | { type: 'INTERACT'; npcId: string; xpAmount: number }
   | { type: 'DIALOGUE_END' }
   | { type: 'COLLECT_ITEM'; itemId: string; displayName: string; fromNpcId?: string }
@@ -47,6 +102,7 @@ export type GameEvent =
   | { type: 'ATTACK' }
   | { type: 'HEAL' }
   | { type: 'DODGE' }
+  | { type: 'DRINK_COFFEE' }
   | { type: 'WIN' }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +125,10 @@ export const gameMachine = setup({
     /** Checked via `always` in the battle state. */
     chazDefeated: ({ context }) => context.chazHP <= 0,
     playerDefeated: ({ context }) => context.playerHP <= 0,
+
+    /** DRINK_COFFEE guard — requires at least one energy-drink in inventory. */
+    hasCoffeeInInventory: ({ context }) =>
+      getItemQuantity(context.inventory, 'energy-drink') > 0,
   },
 
   actions: {
@@ -79,7 +139,7 @@ export const gameMachine = setup({
     setStatusWon:      assign({ status: 'won'      as const }),
     setStatusLost:     assign({ status: 'lost'     as const }),
 
-    /** Full tick update: movement + time + NPC positions. */
+    /** Full tick update: movement + time + NPC positions + energy drain + office events. */
     assignTickUpdate: assign(({ context, event }) => {
       if (event.type !== 'TICK') return {}
       const raw = applyCollisions(
@@ -89,23 +149,126 @@ export const gameMachine = setup({
         event.velocity,
         event.delta,
       )
-      const position = clampToWorld(raw, WORLD_WIDTH, WORLD_HEIGHT, PLAYER_HALF)
+      const position    = clampToWorld(raw, WORLD_WIDTH, WORLD_HEIGHT, PLAYER_HALF)
       const newGameTime = advanceTime(context.gameTime, event.delta / TICKS_PER_GAME_MINUTE)
       const updatedNpcs = context.npcs.map(npc =>
         npc.role === 'location' ? npc : { ...npc, position: getNpcTarget(npc.id, newGameTime) },
       )
+      const newTick = context.tickCount + 1
+
+      // ---- Caffeine timer --------------------------------------------------
+      const newCaffeineTimer = Math.max(0, context.player.caffeineTimer - event.delta)
+      const newIsCaffeinated = newCaffeineTimer > 0
+
+      // ---- Energy drain modifiers ------------------------------------------
+      const hasCaffeineAura = context.unlockedPerks.includes('caffeine-aura')
+      const isSprinting     = (event.isSprinting ?? false) && context.unlockedPerks.includes('sprint')
+      let drainRate = ENERGY_DRAIN_RATE
+      if (hasCaffeineAura) drainRate *= CAFFEINE_AURA_DRAIN_MULTIPLIER
+      if (isSprinting)     drainRate += ENERGY_DRAIN_RATE * SPRINT_EXTRA_DRAIN_MULTIPLIER
+
+      // Hot zone extra drain
+      if (context.activeHotZone && isInHotZone(position.x, position.y, context.activeHotZone)) {
+        drainRate += HOT_ZONE_EXTRA_DRAIN
+      }
+
+      // VC visit proximity drain
+      if (context.vcVisitActive) {
+        const chaz = updatedNpcs.find(n => n.id === 'chaz')
+        if (chaz) {
+          const dx = position.x - chaz.position.x
+          const dy = position.y - chaz.position.y
+          if (dx * dx + dy * dy <= VC_PENALTY_RADIUS * VC_PENALTY_RADIUS) {
+            drainRate += VC_ENERGY_DRAIN
+          }
+        }
+      }
+
+      const newEnergy = Math.max(0, context.player.energy - drainRate * event.delta)
+
+      // ---- Combo decay -----------------------------------------------------
+      let newComboCount      = context.player.comboCount
+      let newIsFlowState     = context.player.isFlowState
+      let newComboDecayTimer = context.player.comboDecayTimer
+      if (newComboDecayTimer > 0) {
+        newComboDecayTimer = Math.max(0, newComboDecayTimer - event.delta)
+        if (newComboDecayTimer === 0 && newComboCount > 0) {
+          newComboCount  = 0
+          newIsFlowState = false
+        }
+      }
+
+      // ---- Hot zone lifecycle ----------------------------------------------
+      let newActiveHotZone       = context.activeHotZone
+      let newHotZoneExpiresAtTick = context.hotZoneExpiresAtTick
+      // Expire current hot zone
+      if (newActiveHotZone && newTick >= newHotZoneExpiresAtTick) {
+        newActiveHotZone = null
+      }
+      // Spawn new hot zone on interval
+      if (!newActiveHotZone && newTick > 0 && newTick % HOT_ZONE_INTERVAL === 0) {
+        newActiveHotZone       = pickHotZone(Math.random())
+        newHotZoneExpiresAtTick = newTick + HOT_ZONE_DURATION
+      }
+
+      // ---- VC Visit lifecycle ----------------------------------------------
+      let newVcVisitActive       = context.vcVisitActive
+      let newVcVisitExpiresAtTick = context.vcVisitExpiresAtTick
+      if (newVcVisitActive && newTick >= newVcVisitExpiresAtTick) {
+        newVcVisitActive = false
+      }
+      if (!newVcVisitActive && newTick > 0 && newTick % VC_VISIT_INTERVAL === 0) {
+        newVcVisitActive       = true
+        newVcVisitExpiresAtTick = newTick + VC_VISIT_DURATION
+      }
+
       return {
-        player: { ...context.player, position },
-        tickCount: context.tickCount + 1,
-        gameTime: newGameTime,
-        npcs: updatedNpcs,
+        player: {
+          ...context.player,
+          position,
+          energy:          newEnergy,
+          caffeineTimer:   newCaffeineTimer,
+          isCaffeinated:   newIsCaffeinated,
+          comboCount:      newComboCount,
+          isFlowState:     newIsFlowState,
+          comboDecayTimer: newComboDecayTimer,
+        },
+        tickCount:             newTick,
+        gameTime:              newGameTime,
+        npcs:                  updatedNpcs,
+        activeHotZone:         newActiveHotZone,
+        hotZoneExpiresAtTick:  newHotZoneExpiresAtTick,
+        vcVisitActive:         newVcVisitActive,
+        vcVisitExpiresAtTick:  newVcVisitExpiresAtTick,
       }
     }),
 
     assignXP: assign(({ context, event }) => {
       if (event.type !== 'INTERACT') return {}
-      const newXp = context.player.xp + event.xpAmount
-      return { player: { ...context.player, xp: newXp, level: calculateLevel(newXp) } }
+      const multiplier     = flowStateXpMultiplier(context.player.isFlowState)
+      const effectiveAmount = Math.floor(event.xpAmount * multiplier)
+      const newXp          = context.player.xp + effectiveAmount
+      const newLevel       = calculateLevel(newXp)
+
+      // Check for perk unlock on level-up
+      const perkId    = PERK_BY_LEVEL[newLevel]
+      const didUnlock = perkId !== undefined && !context.unlockedPerks.includes(perkId)
+      const newUnlockedPerks   = didUnlock ? [...context.unlockedPerks, perkId] : context.unlockedPerks
+      const newLatestPerkUnlock = didUnlock ? (PERK_DISPLAY_NAME[newLevel] ?? null) : context.latestPerkUnlock
+      const newPerkUnlockedAtTick = didUnlock ? context.tickCount : context.perkUnlockedAtTick
+
+      // Record for floating text spawn
+      const npc = context.npcs.find(n => n.id === event.npcId)
+
+      return {
+        player: { ...context.player, xp: newXp, level: newLevel },
+        unlockedPerks:      newUnlockedPerks,
+        latestPerkUnlock:   newLatestPerkUnlock,
+        perkUnlockedAtTick: newPerkUnlockedAtTick,
+        lastXpGained:       effectiveAmount,
+        lastXpGainTick:     context.tickCount,
+        lastXpGainPos:      npc ? { ...npc.position } : null,
+      }
     }),
 
     assignInventory: assign(({ context, event }) => {
@@ -132,7 +295,17 @@ export const gameMachine = setup({
       if (event.type !== 'COMPLETE_TASK') return {}
       const target = context.tasks.find(t => t.type === event.taskType && t.status === 'pending')
       if (!target) return {}
-      return { tasks: completeTask(target.id, context.tasks) }
+      const newCombo     = context.player.comboCount + 1
+      const newFlowState = newCombo >= FLOW_STATE_THRESHOLD
+      return {
+        tasks: completeTask(target.id, context.tasks),
+        player: {
+          ...context.player,
+          comboCount:      newCombo,
+          isFlowState:     newFlowState,
+          comboDecayTimer: COMBO_DECAY_TICKS,
+        },
+      }
     }),
 
     assignActiveDialogue: assign(({ event }) => {
@@ -185,6 +358,25 @@ export const gameMachine = setup({
     }),
 
     /**
+     * DRINK_COFFEE: consume one energy-drink from inventory.
+     * Restores COFFEE_ENERGY_BOOST energy (capped at 100) and starts the
+     * caffeine timer. Refreshes if already caffeinated (doesn't stack duration).
+     * Guard hasCoffeeInInventory must be satisfied before this runs.
+     */
+    assignDrinkCoffee: assign(({ context }) => ({
+      player: {
+        ...context.player,
+        energy:          Math.min(100, context.player.energy + COFFEE_ENERGY_BOOST),
+        isCaffeinated:   true,
+        caffeineTimer:   CAFFEINE_DURATION,
+        comboCount:      0,
+        isFlowState:     false,
+        comboDecayTimer: 0,
+      },
+      inventory: removeItem(context.inventory, 'energy-drink'),
+    })),
+
+    /**
      * DODGE: absorbs almost all of Chaz's attack (0–5 bleed damage).
      * No damage dealt to Chaz.
      */
@@ -220,6 +412,7 @@ export const gameMachine = setup({
         CONSUME_ITEM:  { actions: 'assignConsumeItem' },
         CREATE_TASK:   { actions: 'assignNewTask' },
         COMPLETE_TASK: { actions: 'assignCompleteTask' },
+        DRINK_COFFEE:  { guard: 'hasCoffeeInInventory', actions: 'assignDrinkCoffee' },
         ENTER_BATTLE:  { target: 'battle', guard: 'playerCanBattle', actions: 'resetBattle' },
         WIN:           { target: 'won', guard: 'canBecomeCEO' },
       },

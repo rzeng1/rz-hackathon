@@ -18,9 +18,16 @@ export const createDialogue = (app: Application) => {
   container.visible = false
   app.stage.addChild(container)
 
+  // Drop shadow — offset dark rect simulates elevation (no filter dependency)
+  const panelShadow = new Graphics()
+  panelShadow.rect(PANEL_X + 5, PANEL_Y + 5, PANEL_W, PANEL_H)
+    .fill({ color: 0x000000, alpha: 0.3 })
+  container.addChild(panelShadow)
+
   // Panel background
   const panel = new Graphics()
-  panel.rect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H).fill({ color: 0x111111, alpha: 0.88 })
+  panel.rect(PANEL_X, PANEL_Y, PANEL_W, PANEL_H).fill({ color: 0x111111, alpha: 0.92 })
+    .stroke({ color: 0x333333, width: 1 })
   container.addChild(panel)
 
   // NPC name header

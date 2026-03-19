@@ -23,6 +23,13 @@ export const calculateLevel = (xp: number): number => {
 export const calcLevel = calculateLevel
 
 /**
+ * Returns the XP multiplier to apply while the combo flow state is active.
+ * Pure function — safe to call inside XState assign actions.
+ */
+export const flowStateXpMultiplier = (isFlowState: boolean): number =>
+  isFlowState ? 2 : 1
+
+/**
  * Returns a new Player with xp incremented by amount and level re-derived.
  * Does NOT mutate the input player.
  */

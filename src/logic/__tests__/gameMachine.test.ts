@@ -285,6 +285,284 @@ describe('gameMachine — canBecomeCEO guard (machine integration)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Caffeine / Energy system
+// ---------------------------------------------------------------------------
+
+describe('gameMachine — energy passive drain', () => {
+  it('player starts with energy = 80', () => {
+    expect(playingActor().getSnapshot().context.player.energy).toBe(80)
+  })
+
+  it('energy decreases after 300 TICKs (≈ 5 s at 60 fps)', () => {
+    const actor = playingActor()
+    const before = actor.getSnapshot().context.player.energy
+    for (let i = 0; i < 300; i++) {
+      actor.send({ type: 'TICK', delta: 1, velocity: { x: 0, y: 0 } })
+    }
+    expect(actor.getSnapshot().context.player.energy).toBeLessThan(before)
+  })
+
+  it('energy never goes below 0', () => {
+    const actor = playingActor()
+    // drain it completely (80 energy ÷ (1/300) rate = 24000 ticks)
+    for (let i = 0; i < 25000; i++) {
+      actor.send({ type: 'TICK', delta: 1, velocity: { x: 0, y: 0 } })
+    }
+    expect(actor.getSnapshot().context.player.energy).toBeGreaterThanOrEqual(0)
+  })
+})
+
+describe('gameMachine — DRINK_COFFEE guard', () => {
+  it('DRINK_COFFEE is a no-op when inventory has no energy-drink', () => {
+    const actor  = playingActor()
+    const before = actor.getSnapshot().context.player.energy
+    actor.send({ type: 'DRINK_COFFEE' })
+    expect(actor.getSnapshot().context.player.energy).toBe(before)
+  })
+
+  it('DRINK_COFFEE is a no-op even if energy is 0 and no drink present', () => {
+    const actor = playingActor()
+    actor.send({ type: 'DRINK_COFFEE' })
+    expect(actor.getSnapshot().context.player.isCaffeinated).toBe(false)
+  })
+})
+
+describe('gameMachine — DRINK_COFFEE effects', () => {
+  const caffeActorWithDrink = () => {
+    const actor = playingActor()
+    actor.send({ type: 'COLLECT_ITEM', itemId: 'energy-drink', displayName: 'Energy Drink' })
+    return actor
+  }
+
+  it('DRINK_COFFEE increases energy by 40', () => {
+    const actor  = caffeActorWithDrink()
+    const before = actor.getSnapshot().context.player.energy
+    actor.send({ type: 'DRINK_COFFEE' })
+    expect(actor.getSnapshot().context.player.energy).toBe(Math.min(100, before + 40))
+  })
+
+  it('DRINK_COFFEE caps energy at 100 (started at 80 + 40 = 100)', () => {
+    const actor = caffeActorWithDrink()
+    actor.send({ type: 'DRINK_COFFEE' })
+    expect(actor.getSnapshot().context.player.energy).toBeLessThanOrEqual(100)
+  })
+
+  it('DRINK_COFFEE sets isCaffeinated = true', () => {
+    const actor = caffeActorWithDrink()
+    actor.send({ type: 'DRINK_COFFEE' })
+    expect(actor.getSnapshot().context.player.isCaffeinated).toBe(true)
+  })
+
+  it('DRINK_COFFEE sets caffeineTimer = 600', () => {
+    const actor = caffeActorWithDrink()
+    actor.send({ type: 'DRINK_COFFEE' })
+    expect(actor.getSnapshot().context.player.caffeineTimer).toBe(600)
+  })
+
+  it('DRINK_COFFEE removes the energy-drink from inventory', () => {
+    const actor = caffeActorWithDrink()
+    actor.send({ type: 'DRINK_COFFEE' })
+    const item = actor.getSnapshot().context.inventory.find(i => i.id === 'energy-drink')
+    expect(item).toBeUndefined()
+  })
+
+  it('DRINK_COFFEE with qty=2 leaves qty=1 after consumption', () => {
+    const actor = caffeActorWithDrink()
+    actor.send({ type: 'COLLECT_ITEM', itemId: 'energy-drink', displayName: 'Energy Drink' })
+    actor.send({ type: 'DRINK_COFFEE' })
+    const item = actor.getSnapshot().context.inventory.find(i => i.id === 'energy-drink')
+    expect(item?.quantity).toBe(1)
+  })
+})
+
+describe('gameMachine — caffeine timer expiry', () => {
+  it('isCaffeinated becomes false after 600 TICKs', () => {
+    const actor = playingActor()
+    actor.send({ type: 'COLLECT_ITEM', itemId: 'energy-drink', displayName: 'Energy Drink' })
+    actor.send({ type: 'DRINK_COFFEE' })
+    for (let i = 0; i < 601; i++) {
+      actor.send({ type: 'TICK', delta: 1, velocity: { x: 0, y: 0 } })
+    }
+    expect(actor.getSnapshot().context.player.isCaffeinated).toBe(false)
+  })
+
+  it('caffeineTimer reaches 0 after duration', () => {
+    const actor = playingActor()
+    actor.send({ type: 'COLLECT_ITEM', itemId: 'energy-drink', displayName: 'Energy Drink' })
+    actor.send({ type: 'DRINK_COFFEE' })
+    for (let i = 0; i < 600; i++) {
+      actor.send({ type: 'TICK', delta: 1, velocity: { x: 0, y: 0 } })
+    }
+    expect(actor.getSnapshot().context.player.caffeineTimer).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 9: Combo / Flow State
+// ---------------------------------------------------------------------------
+
+describe('gameMachine — combo flow state', () => {
+  it('player starts with comboCount = 0 and isFlowState = false', () => {
+    const ctx = playingActor().getSnapshot().context.player
+    expect(ctx.comboCount).toBe(0)
+    expect(ctx.isFlowState).toBe(false)
+  })
+
+  it('COMPLETE_TASK increments comboCount', () => {
+    const actor = playingActor()
+    actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+    actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    expect(actor.getSnapshot().context.player.comboCount).toBe(1)
+  })
+
+  it('isFlowState becomes true after 3 completed tasks', () => {
+    const actor = playingActor()
+    for (let i = 0; i < 3; i++) {
+      actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+      actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    }
+    expect(actor.getSnapshot().context.player.isFlowState).toBe(true)
+  })
+
+  it('isFlowState is false with only 2 completed tasks', () => {
+    const actor = playingActor()
+    for (let i = 0; i < 2; i++) {
+      actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+      actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    }
+    expect(actor.getSnapshot().context.player.isFlowState).toBe(false)
+  })
+
+  it('DRINK_COFFEE resets comboCount to 0', () => {
+    const actor = playingActor()
+    actor.send({ type: 'COLLECT_ITEM', itemId: 'energy-drink', displayName: 'Energy Drink' })
+    for (let i = 0; i < 3; i++) {
+      actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+      actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    }
+    expect(actor.getSnapshot().context.player.isFlowState).toBe(true)
+    actor.send({ type: 'DRINK_COFFEE' })
+    expect(actor.getSnapshot().context.player.comboCount).toBe(0)
+    expect(actor.getSnapshot().context.player.isFlowState).toBe(false)
+  })
+
+  it('COMPLETE_TASK resets comboDecayTimer to 1800', () => {
+    const actor = playingActor()
+    actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+    actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    expect(actor.getSnapshot().context.player.comboDecayTimer).toBe(1800)
+  })
+
+  it('combo resets after 1800 TICK inactivity', () => {
+    const actor = playingActor()
+    actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+    actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    expect(actor.getSnapshot().context.player.comboCount).toBe(1)
+    for (let i = 0; i < 1801; i++) {
+      actor.send({ type: 'TICK', delta: 1, velocity: { x: 0, y: 0 } })
+    }
+    expect(actor.getSnapshot().context.player.comboCount).toBe(0)
+    expect(actor.getSnapshot().context.player.isFlowState).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 9: Flow state XP multiplier
+// ---------------------------------------------------------------------------
+
+describe('gameMachine — flow state XP doubling', () => {
+  it('XP gained outside flow state is unmodified', () => {
+    const actor = playingActor()
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 20 })
+    expect(actor.getSnapshot().context.player.xp).toBe(20)
+  })
+
+  it('XP is doubled while in flow state', () => {
+    const actor = playingActor()
+    // Reach flow state (3 tasks)
+    for (let i = 0; i < 3; i++) {
+      actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+      actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    }
+    expect(actor.getSnapshot().context.player.isFlowState).toBe(true)
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 15 })
+    expect(actor.getSnapshot().context.player.xp).toBe(30)
+  })
+
+  it('lastXpGained reflects the effective (multiplied) amount', () => {
+    const actor = playingActor()
+    for (let i = 0; i < 3; i++) {
+      actor.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+      actor.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+    }
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 15 })
+    expect(actor.getSnapshot().context.lastXpGained).toBe(30)
+  })
+
+  it('lastXpGainTick is updated on INTERACT', () => {
+    const actor = playingActor()
+    const before = actor.getSnapshot().context.lastXpGainTick
+    for (let i = 0; i < 5; i++) {
+      actor.send({ type: 'TICK', delta: 1, velocity: { x: 0, y: 0 } })
+    }
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 10 })
+    expect(actor.getSnapshot().context.lastXpGainTick).toBeGreaterThan(before)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 9: Level perks
+// ---------------------------------------------------------------------------
+
+describe('gameMachine — level perk unlocks', () => {
+  it('no perks unlocked at level 1', () => {
+    expect(playingActor().getSnapshot().context.unlockedPerks).toHaveLength(0)
+  })
+
+  it('caffeine-aura perk unlocks on reaching level 4', () => {
+    const actor = playingActor()
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 90 })  // XP_TABLE[3]=90 → level 4
+    expect(actor.getSnapshot().context.unlockedPerks).toContain('caffeine-aura')
+  })
+
+  it('sprint perk unlocks on reaching level 7', () => {
+    const actor = playingActor()
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 235 })  // → level 7
+    expect(actor.getSnapshot().context.unlockedPerks).toContain('sprint')
+  })
+
+  it('latestPerkUnlock is set when a perk is unlocked', () => {
+    const actor = playingActor()
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 90 })  // level 4
+    expect(actor.getSnapshot().context.latestPerkUnlock).toBe('CAFFEINE AURA')
+  })
+
+  it('caffeine-aura perk is not added twice', () => {
+    const actor = playingActor()
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 90 })  // level 4, perk unlocked
+    actor.send({ type: 'DIALOGUE_END' })
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 0 })  // level stays 4
+    const perks = actor.getSnapshot().context.unlockedPerks
+    expect(perks.filter(p => p === 'caffeine-aura')).toHaveLength(1)
+  })
+
+  it('caffeine-aura halves energy drain per tick', () => {
+    const actor = playingActor()
+    actor.send({ type: 'INTERACT', npcId: 'paul', xpAmount: 90 })  // level 4, unlock caffeine-aura
+    actor.send({ type: 'DIALOGUE_END' })
+    const energyBefore = actor.getSnapshot().context.player.energy
+
+    // Tick 300 times — normal drain would be 1 point; with aura should be ~0.5
+    for (let i = 0; i < 300; i++) {
+      actor.send({ type: 'TICK', delta: 1, velocity: { x: 0, y: 0 } })
+    }
+    const drained = energyBefore - actor.getSnapshot().context.player.energy
+    // Without aura: ~1 point. With aura: ~0.5 points (much less than 1)
+    expect(drained).toBeLessThan(0.75)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // isEligibleForPromotion — pure predicate tests
 // ---------------------------------------------------------------------------
 

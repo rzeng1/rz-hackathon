@@ -58,6 +58,10 @@
 - **Derived NPC Positions**: NPC positions are no longer static after game start. Each TICK, `getNpcTarget(npcId, gameTime)` returns the NPC's schedule-driven destination. The machine assigns updated NPC positions as part of the TICK action — no new XState state is needed for time-of-day transitions.
 - **TaskFactory**: Task objects (Product Specs, Customer Fires, Success Stories) are created via `createTask(type, assignedBy, tick)` in `src/factories/taskFactory.ts`. This is a pure factory function — no class, no `new`. Tasks are stored in `GameState.tasks: Task[]` and consumed/completed via XState actions backed by pure helpers in `src/logic/tasks.ts`.
 
+- **Styling Rules**: All UI layout values (padding, bar heights, font sizes) must be stored in the central `src/view/layout_constants.ts` file. Do not use magic numbers for positioning display objects.
+
+- **Coordinate Decoupling**: Entity positions (NPCs) and World Object positions (Desks/Coolers) must be distinct. Changing an NPC's home coordinate should automatically move their associated static collision box to match
+
 ## Testing Approach
 - **Logic**: 100% Unit Test coverage via Vitest.
 - **Machine guards**: Guard predicates extracted as pure functions and tested directly.
