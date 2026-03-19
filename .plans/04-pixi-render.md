@@ -140,7 +140,7 @@ This function owns all branching logic:
 
 **Script constants (inside `src/logic/dialogue.ts`):**
 ```
-ernesto_eligible:   "Yo, you look dead. Here's a Red Bull. Don't tell HR."
+ernesto_eligible:   "Yo, you look dead. Here's a Celsius. Don't tell HR."
 ernesto_blocked:    "You're too junior for the good caffeine."
 priya:              "Push to prod? On a Friday? Bold move."
 jake:               "Bro, I literally closed a deal in my sleep last night."

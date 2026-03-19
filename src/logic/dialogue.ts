@@ -9,14 +9,14 @@ import { canInteractWithErnesto } from './npc'
  */
 const SCRIPTS = {
   // Ernesto — Energy Drink Gatekeeper (Phase 1)
-  ernesto_eligible: "Yo, you look dead. Here's a Red Bull. Don't tell HR.",
+  ernesto_eligible: "Yo, you look dead. Here's a Celsius. Don't tell HR.",
   ernesto_blocked:  "You're too junior for the good caffeine.",
 
   // Matthew — Product Manager
   matthew_default: "I've got three specs due by EOD. Here, take one.",
 
   // Paul — Head of Product
-  paul_eligible:   "Finally. A spec with my name on it.",
+  paul_eligible:   "Nice job developing this PRD!",
   paul_blocked:    "Bring me a spec first. I don't do verbal requirements.",
 
   // Rizzo — Head of Customer Success
