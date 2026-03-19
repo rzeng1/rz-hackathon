@@ -1,22 +1,25 @@
 import { Application, Container, Graphics } from 'pixi.js'
 import type { GameState } from '../logic/state'
 import { INITIAL_STATE } from '../logic/state'
-import { getStaticObstacles } from '../logic/world'
+import { getStaticObstacles, COOLER_RECT } from '../logic/world'
 
 // NPC placeholder colours by id
 const NPC_COLOURS: Record<string, number> = {
-  ernesto: 0xff6b35,
-  priya:   0x4caf50,
-  jake:    0x4caf50,
-  linda:   0x4caf50,
-  ceo:     0xffd700,
+  ernesto:    0xff6b35,  // orange-red — energy drink gatekeeper
+  matthew:    0x4caf50,  // green — product manager
+  paul:       0x2196f3,  // blue — head of product
+  rizzo:      0xff9800,  // amber — customer success
+  chaz:       0xffd700,  // gold — CEO
+  server_rack: 0x607d8b, // grey-blue — hardware
 }
 
 const PLAYER_HALF = 12  // half of 24px player size
+const LERP_SPEED  = 0.12 // cosmetic interpolation factor (per frame)
 
 /**
  * Creates and owns all PixiJS display objects for the game world.
  * Exposes a single update(state) method — no logic lives here.
+ * NPC positions are smoothly interpolated toward their state-driven targets.
  */
 export const createRenderer = (app: Application) => {
   // ------------------------------------------------------------------ world
@@ -38,21 +41,38 @@ export const createRenderer = (app: Application) => {
   obstacleGfx.zIndex = 10
   world.addChild(obstacleGfx)
 
+  // Energy Drink Cooler — drawn on top of the obstacle layer with a distinct
+  // colour. Coordinates come from COOLER_RECT in world.ts (no hardcoding here).
+  const coolerGfx = new Graphics()
+  coolerGfx.rect(COOLER_RECT.x, COOLER_RECT.y, COOLER_RECT.width, COOLER_RECT.height)
+    .fill(0x00bcd4)  // cyan — unmistakably a fridge
+  coolerGfx.zIndex = 11
+  world.addChild(coolerGfx)
+
   // ------------------------------------------------------------------ player
   const playerGfx = new Graphics()
   playerGfx.rect(-PLAYER_HALF, -PLAYER_HALF, PLAYER_HALF * 2, PLAYER_HALF * 2).fill(0x3a7bd5)
   world.addChild(playerGfx)
 
   // ------------------------------------------------------------------ NPCs
-  const npcGfxMap = new Map<string, Graphics>()
+  // Display positions are interpolated toward the logical state positions each frame.
+  const npcGfxMap    = new Map<string, Graphics>()
+  const npcDisplayPos = new Map<string, { x: number; y: number }>()
+
   for (const npc of INITIAL_STATE.npcs) {
     const g = new Graphics()
-    g.rect(-PLAYER_HALF, -PLAYER_HALF, PLAYER_HALF * 2, PLAYER_HALF * 2)
-      .fill(NPC_COLOURS[npc.id] ?? 0x999999)
+    if (npc.role === 'location') {
+      // Server Rack rendered as a rectangle, not a character square
+      g.rect(-20, -30, 40, 60).fill(NPC_COLOURS[npc.id] ?? 0x607d8b)
+    } else {
+      g.rect(-PLAYER_HALF, -PLAYER_HALF, PLAYER_HALF * 2, PLAYER_HALF * 2)
+        .fill(NPC_COLOURS[npc.id] ?? 0x999999)
+    }
     g.position.set(npc.position.x, npc.position.y)
     g.zIndex = npc.position.y
     world.addChild(g)
     npcGfxMap.set(npc.id, g)
+    npcDisplayPos.set(npc.id, { x: npc.position.x, y: npc.position.y })
   }
 
   // ------------------------------------------------------------------ highlight ring
@@ -71,10 +91,6 @@ export const createRenderer = (app: Application) => {
   winBg.rect(0, 0, 1280, 720).fill({ color: 0x000000, alpha: 0.75 })
   winOverlay.addChild(winBg)
 
-  const winText = new Graphics()
-  winOverlay.addChild(winText)
-  // Text drawn as large centred message — uses a separate Text object
-  // imported lazily to keep this factory free of Text until needed
   let winTextAdded = false
 
   // ------------------------------------------------------------------ update
@@ -83,10 +99,9 @@ export const createRenderer = (app: Application) => {
     if (state.status === 'won') {
       winOverlay.visible = true
       if (!winTextAdded) {
-        // Inline import avoids circular deps; Text is only needed once
         import('pixi.js').then(({ Text }) => {
           const t = new Text({
-            text: 'YOU ARE NOW CEO 🎉',
+            text: 'YOU ARE NOW CEO',
             style: { fill: '#ffd700', fontSize: 56, fontWeight: 'bold', align: 'center' },
           })
           t.anchor.set(0.5)
@@ -102,10 +117,25 @@ export const createRenderer = (app: Application) => {
     playerGfx.position.set(state.player.position.x, state.player.position.y)
     playerGfx.zIndex = state.player.position.y
 
-    // NPCs — Y-sort (positions are fixed; zIndex still needed for Y-sort correctness)
+    // NPCs — lerp display position toward logical position for smooth movement
     for (const npc of state.npcs) {
       const g = npcGfxMap.get(npc.id)
-      if (g) g.zIndex = npc.position.y
+      if (!g) continue
+
+      if (npc.role === 'location') {
+        // Locations never move; just ensure position is set
+        g.position.set(npc.position.x, npc.position.y)
+        g.zIndex = npc.position.y
+        continue
+      }
+
+      const display = npcDisplayPos.get(npc.id) ?? { x: npc.position.x, y: npc.position.y }
+      display.x += (npc.position.x - display.x) * LERP_SPEED
+      display.y += (npc.position.y - display.y) * LERP_SPEED
+      npcDisplayPos.set(npc.id, display)
+
+      g.position.set(display.x, display.y)
+      g.zIndex = display.y
     }
 
     // Interaction highlight ring — show on active dialogue NPC

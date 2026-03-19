@@ -4,12 +4,13 @@ import { INITIAL_STATE } from '../logic/state'
 import { getItemQuantity } from '../logic/inventory'
 import { XP_TABLE } from '../logic/xp'
 import { getStaticObstacles } from '../logic/world'
+import { formatTime } from '../logic/time'
 
 const BAR_WIDTH = 200
 const BAR_HEIGHT = 12
 
 /**
- * Non-diegetic UI overlay — XP bar, level badge, drink counter.
+ * Non-diegetic UI overlay — XP bar, level badge, drink counter, game clock.
  * Also owns the debug overlay (\ key toggle).
  * No game logic lives here; all values come from GameState or pure logic calls.
  */
@@ -42,9 +43,22 @@ export const createHud = (app: Application) => {
   drinkLabel.position.set(16, 88)
   hud.addChild(drinkLabel)
 
-  // Debug mode indicator (top-right)
+  // Game clock — top-right area
+  const clockLabel = new Text({
+    text: '09:00 AM',
+    style: { fill: '#ffffff', fontSize: 16, fontWeight: 'bold' },
+  })
+  clockLabel.position.set(1280 - 120, 16)
+  hud.addChild(clockLabel)
+
+  // Active fires indicator
+  const fireLabel = new Text({ text: '', style: { fill: '#ff4444', fontSize: 14 } })
+  fireLabel.position.set(16, 112)
+  hud.addChild(fireLabel)
+
+  // Debug mode indicator
   const debugLabel = new Text({ text: 'DEBUG ON', style: { fill: '#ff4444', fontSize: 13 } })
-  debugLabel.position.set(1280 - 90, 16)
+  debugLabel.position.set(1280 - 90, 40)
   debugLabel.visible = false
   hud.addChild(debugLabel)
 
@@ -97,6 +111,13 @@ export const createHud = (app: Application) => {
 
     const drinks = getItemQuantity(state.inventory, 'energy-drink')
     drinkLabel.text = `☕ x${drinks}`
+
+    // Game clock
+    clockLabel.text = formatTime(state.gameTime)
+
+    // Active fires
+    const pendingFires = state.tasks.filter(t => t.type === 'customer-fire' && t.status === 'pending').length
+    fireLabel.text = pendingFires > 0 ? `🔥 ${pendingFires} fire${pendingFires > 1 ? 's' : ''}` : ''
   }
 
   const destroy = () => window.removeEventListener('keydown', onKeyDown)

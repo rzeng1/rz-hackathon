@@ -4,6 +4,8 @@ import type { InputDirection } from '../logic/movement'
 import { inputToVelocity } from '../logic/movement'
 import { getNearbyNpc, NPC_XP_AWARDS, canCollectFromNpc, canInteractWithErnesto } from '../logic/npc'
 import { isEligibleForPromotion } from '../logic/promotion'
+import { hasProductSpec, hasActiveFire, hasSuccessStory, canButtKissChaz } from '../logic/npcBehavior'
+import { calculateLevel } from '../logic/xp'
 
 type Machine = Actor<typeof gameMachine>
 
@@ -16,9 +18,21 @@ export const createInput = (machine: Machine) => {
   const dir: InputDirection = { up: false, down: false, left: false, right: false }
 
   const onKeyDown = (e: KeyboardEvent) => {
-    // Prevent page scrolling on arrow keys during gameplay
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
       e.preventDefault()
+    }
+
+    const snapshot = machine.getSnapshot()
+    const ctx = snapshot.context
+
+    // ---------------------------------------------------------------- battle controls
+    if (snapshot.value === 'battle') {
+      switch (e.code) {
+        case 'Digit1': case 'KeyA': machine.send({ type: 'ATTACK' }); break
+        case 'Digit2': case 'KeyH': machine.send({ type: 'HEAL'   }); break
+        case 'Digit3': case 'KeyD': machine.send({ type: 'DODGE'  }); break
+      }
+      return
     }
 
     switch (e.code) {
@@ -28,16 +42,12 @@ export const createInput = (machine: Machine) => {
       case 'ArrowRight': case 'KeyD': dir.right = true; break
 
       case 'KeyE': case 'Space': {
-        const snapshot = machine.getSnapshot()
-        const ctx = snapshot.context
-
+        // ---------------------------------------------------------------- dialogue state
         if (snapshot.value === 'dialogue') {
           const activeNpcId = ctx.activeDialogueNpcId
-
-          // Dismiss dialogue
           machine.send({ type: 'DIALOGUE_END' })
 
-          // Post-dialogue item collection for Ernesto
+          // Ernesto energy drink (legacy gatekeeper)
           if (
             activeNpcId === 'ernesto' &&
             canInteractWithErnesto(ctx.player) &&
@@ -51,19 +61,70 @@ export const createInput = (machine: Machine) => {
             })
           }
 
-          // Post-dialogue WIN dispatch for CEO
-          if (activeNpcId === 'ceo' && isEligibleForPromotion(ctx.player, ctx.inventory)) {
-            machine.send({ type: 'WIN' })
-          }
-        } else if (snapshot.value === 'playing') {
-          const nearbyNpc = getNearbyNpc(ctx.player.position, ctx.npcs)
-          if (nearbyNpc) {
+          // Matthew → always give product-spec
+          if (activeNpcId === 'matthew') {
             machine.send({
-              type: 'INTERACT',
-              npcId: nearbyNpc.id,
-              xpAmount: NPC_XP_AWARDS[nearbyNpc.id] ?? 0,
+              type: 'COLLECT_ITEM',
+              itemId: 'product-spec',
+              displayName: 'Product Spec',
             })
           }
+
+          // Paul → consume product-spec (XP awarded in INTERACT)
+          if (activeNpcId === 'paul' && hasProductSpec(ctx.inventory)) {
+            machine.send({ type: 'CONSUME_ITEM', itemId: 'product-spec' })
+          }
+
+          // Rizzo → 3-state post-dialogue
+          if (activeNpcId === 'rizzo') {
+            if (hasSuccessStory(ctx.inventory)) {
+              machine.send({ type: 'CONSUME_ITEM', itemId: 'success-story' })
+            } else if (!hasActiveFire(ctx.tasks)) {
+              machine.send({ type: 'CREATE_TASK', taskType: 'customer-fire', assignedBy: 'rizzo' })
+            }
+          }
+
+          // Server Rack → fix fire + collect success-story
+          if (activeNpcId === 'server_rack' && hasActiveFire(ctx.tasks)) {
+            machine.send({ type: 'COMPLETE_TASK', taskType: 'customer-fire' })
+            machine.send({
+              type: 'COLLECT_ITEM',
+              itemId: 'success-story',
+              displayName: 'Success Story',
+            })
+          }
+
+          // Chaz → butt-kissing (consume story, XP in INTERACT)
+          if (activeNpcId === 'chaz' && canButtKissChaz(ctx.player, ctx.inventory)) {
+            machine.send({ type: 'CONSUME_ITEM', itemId: 'success-story' })
+          }
+
+          // Win condition (phase 1 legacy path)
+          if (activeNpcId === 'ceo' && isEligibleForPromotion(ctx.player, ctx.inventory, ctx.tasks)) {
+            machine.send({ type: 'WIN' })
+          }
+
+        // ---------------------------------------------------------------- playing state
+        } else if (snapshot.value === 'playing') {
+          const nearbyNpc = getNearbyNpc(ctx.player.position, ctx.npcs)
+          if (!nearbyNpc) break
+
+          // Server Rack only interactable with active fire
+          if (nearbyNpc.id === 'server_rack' && !hasActiveFire(ctx.tasks)) break
+
+          // Chaz at Level 10 → enter boss battle (bypasses normal dialogue)
+          if (nearbyNpc.id === 'chaz' && calculateLevel(ctx.player.xp) >= 10) {
+            machine.send({ type: 'ENTER_BATTLE' })
+            break
+          }
+
+          // All other interactions → INTERACT with guarded XP amount
+          let xpAmount = NPC_XP_AWARDS[nearbyNpc.id] ?? 0
+          if (nearbyNpc.id === 'paul'  && !hasProductSpec(ctx.inventory))             xpAmount = 0
+          if (nearbyNpc.id === 'rizzo' && !hasSuccessStory(ctx.inventory))            xpAmount = 0
+          if (nearbyNpc.id === 'chaz'  && !canButtKissChaz(ctx.player, ctx.inventory)) xpAmount = 0
+
+          machine.send({ type: 'INTERACT', npcId: nearbyNpc.id, xpAmount })
         }
         break
       }
@@ -71,6 +132,8 @@ export const createInput = (machine: Machine) => {
   }
 
   const onKeyUp = (e: KeyboardEvent) => {
+    // Battle state: movement keys irrelevant
+    if (machine.getSnapshot().value === 'battle') return
     switch (e.code) {
       case 'ArrowUp':    case 'KeyW': dir.up    = false; break
       case 'ArrowDown':  case 'KeyS': dir.down  = false; break
@@ -83,10 +146,7 @@ export const createInput = (machine: Machine) => {
   window.addEventListener('keyup', onKeyUp)
 
   return {
-    /** Returns the current velocity Vec2 based on held keys and player speed. */
     getVelocity: (speed: number) => inputToVelocity(dir, speed),
-
-    /** Removes all event listeners. Call on HMR teardown. */
     destroy: () => {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)

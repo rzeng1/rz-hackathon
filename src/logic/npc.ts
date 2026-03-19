@@ -7,6 +7,13 @@ import type { Vec2, NPC, NPCState, Player } from './state'
 // ---------------------------------------------------------------------------
 
 export const NPC_XP_AWARDS: Record<string, number> = {
+  // Phase 2 roster
+  matthew:    0,   // Produces product-specs; no direct XP
+  paul:       15,  // Rewards XP for product-spec (guard: hasProductSpec)
+  rizzo:      12,  // Rewards XP after fire resolution (guard: hasSuccessStory)
+  chaz:       25,  // CEO-track Butt-Kissing XP (guard: canButtKissChaz)
+  server_rack: 0,  // Fix location; no XP
+  // Phase 1 roster (kept for backward compatibility)
   ernesto: 0,
   priya: 10,
   jake: 8,

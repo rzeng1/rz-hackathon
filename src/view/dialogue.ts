@@ -67,7 +67,7 @@ export const createDialogue = (app: Application) => {
     if (!npc) return
 
     nameText.text = npc.displayName
-    bodyText.text = getDialogueText(state.activeDialogueNpcId!, state.player, state.inventory)
+    bodyText.text = getDialogueText(state.activeDialogueNpcId!, state.player, state.inventory, state.tasks)
   }
 
   return { update }

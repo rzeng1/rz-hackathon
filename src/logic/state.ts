@@ -1,3 +1,9 @@
+import type { GameTime } from './time'
+import { INITIAL_GAME_TIME } from './time'
+import type { Task } from './tasks'
+import { NPC_DESK_POSITIONS, ERNESTO_POST } from './npcSchedule'
+import { PLAYER_MAX_HP, CHAZ_MAX_HP } from './battle'
+
 export type Vec2 = {
   x: number
   y: number
@@ -16,7 +22,7 @@ export type NPC = {
   displayName: string
   position: Vec2
   interactionRadius: number
-  role: 'gatekeeper' | 'colleague'
+  role: 'gatekeeper' | 'colleague' | 'location'
 }
 
 export type NPCState = {
@@ -31,7 +37,7 @@ export type InventoryItem = {
   quantity: number
 }
 
-export type GameStatus = 'idle' | 'playing' | 'dialogue' | 'won' | 'lost'
+export type GameStatus = 'idle' | 'playing' | 'dialogue' | 'battle' | 'won' | 'lost'
 
 export type GameState = {
   status: GameStatus
@@ -41,13 +47,18 @@ export type GameState = {
   inventory: InventoryItem[]
   activeDialogueNpcId: string | null
   tickCount: number
+  gameTime: GameTime
+  tasks: Task[]
+  playerHP: number
+  chazHP: number
+  lastBattleMessage: string
 }
 
 export const INITIAL_STATE: GameState = {
   status: 'idle',
   player: {
     id: 'player',
-    position: { x: 400, y: 300 },
+    position: { x: 640, y: 400 },
     speed: 3,
     xp: 0,
     level: 1,
@@ -56,41 +67,53 @@ export const INITIAL_STATE: GameState = {
     {
       id: 'ernesto',
       displayName: 'Ernesto',
-      position: { x: 84, y: 100 },
+      position: ERNESTO_POST,
       interactionRadius: 60,
       role: 'gatekeeper',
     },
     {
-      id: 'priya',
-      displayName: 'Priya',
-      position: { x: 450, y: 230 },
+      id: 'matthew',
+      displayName: 'Matthew',
+      position: NPC_DESK_POSITIONS.matthew,
       interactionRadius: 60,
       role: 'colleague',
     },
     {
-      id: 'jake',
-      displayName: 'Jake',
-      position: { x: 850, y: 230 },
+      id: 'paul',
+      displayName: 'Paul',
+      position: NPC_DESK_POSITIONS.paul,
       interactionRadius: 60,
       role: 'colleague',
     },
     {
-      id: 'linda',
-      displayName: 'Linda',
-      position: { x: 380, y: 480 },
+      id: 'rizzo',
+      displayName: 'Rizzo',
+      position: NPC_DESK_POSITIONS.rizzo,
       interactionRadius: 60,
       role: 'colleague',
     },
     {
-      id: 'ceo',
-      displayName: 'The CEO',
-      position: { x: 1040, y: 530 },
-      interactionRadius: 60,
-      role: 'colleague',
+      id: 'chaz',
+      displayName: 'Chaz',
+      position: NPC_DESK_POSITIONS.chaz,
+      interactionRadius: 70,
+      role: 'gatekeeper',
+    },
+    {
+      id: 'server_rack',
+      displayName: 'Server Rack',
+      position: { x: 50, y: 650 },
+      interactionRadius: 50,
+      role: 'location',
     },
   ],
   npcStates: [],
   inventory: [],
   activeDialogueNpcId: null,
   tickCount: 0,
+  gameTime: INITIAL_GAME_TIME,
+  tasks: [],
+  playerHP: PLAYER_MAX_HP,
+  chazHP: CHAZ_MAX_HP,
+  lastBattleMessage: '',
 }

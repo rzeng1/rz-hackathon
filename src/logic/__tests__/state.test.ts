@@ -27,15 +27,41 @@ describe('INITIAL_STATE shape', () => {
     expect(INITIAL_STATE.activeDialogueNpcId).toBeNull()
   })
 
-  it('contains exactly one gatekeeper NPC (ernesto)', () => {
-    const gatekeepers = INITIAL_STATE.npcs.filter(n => n.role === 'gatekeeper')
-    expect(gatekeepers).toHaveLength(1)
-    expect(gatekeepers[0].id).toBe('ernesto')
+  it('tasks starts empty', () => {
+    expect(INITIAL_STATE.tasks).toEqual([])
   })
 
-  it('contains 4 colleague NPCs', () => {
+  it('gameTime starts at 09:00', () => {
+    expect(INITIAL_STATE.gameTime).toEqual({ hours: 9, minutes: 0 })
+  })
+
+  it('contains exactly two gatekeeper NPCs (ernesto and chaz)', () => {
+    const gatekeepers = INITIAL_STATE.npcs.filter(n => n.role === 'gatekeeper')
+    expect(gatekeepers).toHaveLength(2)
+    const ids = gatekeepers.map(n => n.id)
+    expect(ids).toContain('ernesto')
+    expect(ids).toContain('chaz')
+  })
+
+  it('contains 3 colleague NPCs', () => {
     const colleagues = INITIAL_STATE.npcs.filter(n => n.role === 'colleague')
-    expect(colleagues).toHaveLength(4)
+    expect(colleagues).toHaveLength(3)
+  })
+
+  it('contains 1 location NPC (server_rack)', () => {
+    const locations = INITIAL_STATE.npcs.filter(n => n.role === 'location')
+    expect(locations).toHaveLength(1)
+    expect(locations[0].id).toBe('server_rack')
+  })
+
+  it('NPC roster includes ernesto, matthew, paul, rizzo, chaz, server_rack', () => {
+    const ids = INITIAL_STATE.npcs.map(n => n.id)
+    expect(ids).toContain('ernesto')
+    expect(ids).toContain('matthew')
+    expect(ids).toContain('paul')
+    expect(ids).toContain('rizzo')
+    expect(ids).toContain('chaz')
+    expect(ids).toContain('server_rack')
   })
 })
 

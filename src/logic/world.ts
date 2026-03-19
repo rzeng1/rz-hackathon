@@ -4,10 +4,17 @@ export const WORLD_WIDTH  = 1280
 export const WORLD_HEIGHT = 720
 
 /**
+ * Named reference to the Energy Drink Cooler rect.
+ * Exported so the view layer can render it with a distinct colour.
+ * Also included in STATIC_OBSTACLES — single source of truth.
+ */
+export const COOLER_RECT: Rect = { x: 62, y: 62, width: 41, height: 68 }
+
+/**
  * Static obstacle map for the office.
  * All coordinates are top-left origin, matching the Rect convention.
  *
- * INTERACTION BUFFER RULE: Collision boxes for NPC-adjacent furniture (Fridge,
+ * INTERACTION BUFFER RULE: Collision boxes for NPC-adjacent furniture (Cooler,
  * CEO Desk) are intentionally 10–20% smaller than the visual sprite footprint.
  * This ensures the player can enter the NPC's interactionRadius without being
  * blocked by the obstacle geometry.
@@ -25,17 +32,17 @@ export const STATIC_OBSTACLES: Rect[] = [
   // ---- Reception desk ----
   { x: 100, y: 80, width: 160, height: 60 },
 
-  // ---- Fridge (Ernesto's post) ----
-  // Collision box ~15% smaller than visual to keep interactionRadius accessible.
-  { x: 62, y: 62, width: 41, height: 68 },
+  // ---- Energy Drink Cooler (Ernesto's post) ----
+  // ~15% smaller than visual so interactionRadius remains accessible.
+  COOLER_RECT,
 
-  // ---- Engineering desks (Priya's area) ----
+  // ---- Engineering desks ----
   { x: 300, y: 200, width: 300, height: 60 },
 
-  // ---- Sales desks (Jake's area) ----
+  // ---- Sales desks ----
   { x: 700, y: 200, width: 300, height: 60 },
 
-  // ---- HR desk (Linda's area) ----
+  // ---- HR desk ----
   { x: 300, y: 450, width: 160, height: 60 },
 
   // ---- CEO office wall — split into two pieces leaving the door gap passable ----
@@ -43,8 +50,14 @@ export const STATIC_OBSTACLES: Rect[] = [
   { x: 1060, y: 400, width: 140, height: 16 }, // Right of door (x 1060–1200)
 
   // ---- CEO desk ----
-  // Collision box ~15% smaller than visual to keep interactionRadius accessible.
+  // ~15% smaller than visual so interactionRadius remains accessible.
   { x: 958, y: 505, width: 153, height: 51 },
+
+  // ---- Server Rack (customer-fire fix location) ----
+  { x: 16, y: 620, width: 40, height: 60 },
+
+  // ---- Lunch Room table (visual only — narrow so NPCs can path around it) ----
+  { x: 555, y: 80, width: 100, height: 40 },
 ]
 
 /**
